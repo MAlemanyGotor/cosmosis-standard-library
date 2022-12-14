@@ -3,6 +3,7 @@ from cosmosis.datablock.cosmosis_py import errors
 import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline
 import warnings
+import traceback
 
 # Finally we can now import camb
 import camb
@@ -72,6 +73,8 @@ def setup(options):
     more_config = {}
 
     more_config["mode"] = mode
+    more_config["max_printed_errors"] = options.get_int(opt, 'max_printed_errors', default=20)
+    more_config["n_printed_errors"] = 0
     config['WantCls'] = mode in [MODE_CMB, MODE_ALL]
     config['WantTransfer'] = mode in [MODE_POWER, MODE_ALL]
     config['WantScalars'] = True
@@ -112,6 +115,7 @@ def setup(options):
     
     more_config['use_tabulated_w'] = options.get_bool(opt, 'use_tabulated_w', default=False)
     more_config['use_ppf_w'] = options.get_bool(opt, 'use_ppf_w', default=False)
+    more_config['do_bao'] = options.get_bool(opt, 'do_bao', default=True)
     
     more_config["nonlinear_params"] = get_optional_params(options, opt, ["halofit_version", "Min_kh_nonlinear"])
 
@@ -138,7 +142,7 @@ def setup(options):
     more_config['zmax_background'] = options.get_double(opt, 'zmax_background', default=more_config['zmax'])
     more_config['nz_background'] = options.get_int(opt, 'nz_background', default=more_config['nz'])
 
-    more_config["transfer_params"] = get_optional_params(options, opt, ["k_per_logint", "accurate_massive_neutrinos"])
+    more_config["transfer_params"] = get_optional_params(options, opt, ["k_per_logint", "accurate_massive_neutrino_transfers"])
     # Adjust CAMB defaults
     more_config["transfer_params"]["kmax"] = options.get_double(opt, "kmax", default=10.0)
     # more_config["transfer_params"]["high_precision"] = options.get_bool(opt, "high_precision", default=True)
@@ -232,8 +236,8 @@ def extract_dark_energy_params(block, config, more_config):
 
     dark_energy = de_class()
     if more_config['use_tabulated_w']:
-        a = block[name.de_equation_of_state, 'a']
-        w = block[name.de_equation_of_state, 'w']
+        a = block[names.de_equation_of_state, 'a']
+        w = block[names.de_equation_of_state, 'w']
         dark_energy.set_w_a_table(a, w)
     else:
         w0 = block.get_double(cosmo, 'w', default=-1.0)
@@ -257,10 +261,15 @@ def extract_initial_power_params(block, config, more_config):
     return init_power
 
 def extract_nonlinear_params(block, config, more_config):
-    if 'mead' in more_config["nonlinear_params"].get('halofit_version', ''):
+    version = more_config["nonlinear_params"].get('halofit_version', '')
+
+    if version == "mead2015" or version == "mead2016" or version == "mead":
         A = block[names.halo_model_parameters, 'A']
         eta0 = block[names.halo_model_parameters, "eta"]
         hmcode_params = {"HMCode_A_baryon": A, "HMCode_eta_baryon":eta0}
+    elif version == "mead2020_feedback":
+        T_AGN = block[names.halo_model_parameters, 'logT_AGN']
+        hmcode_params = {"HMCode_logT_AGN": T_AGN}
     else:
         hmcode_params = {}
 
@@ -289,8 +298,12 @@ def extract_camb_params(block, config, more_config):
     want_perturbations = more_config['mode'] not in [MODE_BG, MODE_THERM]
     want_thermal = more_config['mode'] != MODE_BG
 
+    # JMedit - check for input sigma8
+    samplesig8 = block.has_value(cosmo, 'sigma_8_input')
+    
     # if want_perturbations:
-    init_power = extract_initial_power_params(block, config, more_config)
+    if not samplesig8: #JMedit; if we're sampling sigma8, wait til we have A_s
+        init_power = extract_initial_power_params(block, config, more_config)
     nonlinear = extract_nonlinear_params(block, config, more_config)
 # else:
     #     init_power = None
@@ -314,7 +327,7 @@ def extract_camb_params(block, config, more_config):
     # Get optional parameters from datablock.
     cosmology_params = get_optional_params(block, cosmo, 
         ["TCMB", "YHe", "mnu", "nnu", "standard_neutrino_neff", "num_massive_neutrinos",
-        ("A_lens", "Alens")])
+         ("A_lens", "Alens")])
 
     if block.has_value(cosmo, "massless_nu"):
         warnings.warn("Parameter massless_nu is being ignored. Set nnu, the effective number of relativistic species in the early Universe.")
@@ -331,7 +344,14 @@ def extract_camb_params(block, config, more_config):
         cosmology_params["H0"] = block[cosmo, "h0"]*100
     else:
         cosmology_params["cosmomc_theta"] = block[cosmo, "cosmomc_theta"]/100
-    
+
+    #JMedit
+    if samplesig8:
+        # compute linear matter power spec to figure out what A_s should be
+        #  for desired input sigma8, add it to the datblock
+        sigma8_to_As(block, config, more_config, cosmology_params, dark_energy, reion)
+        init_power = extract_initial_power_params(block, config, more_config)
+        
     p = camb.CAMBparams(
         InitPower = init_power,
         Recomb = recomb,
@@ -437,9 +457,10 @@ def save_distances(r, p, block, more_config):
     block[names.distances, "MU"] = mu
     block[names.distances, "H"] = r.h_of_z(z_background)
 
-    rs_DV, _, _, F_AP = r.get_BAO(z_background, p).T
-    block[names.distances, "rs_DV"] = rs_DV
-    block[names.distances, "F_AP"] = F_AP
+    if more_config['do_bao']:
+        rs_DV, _, _, F_AP = r.get_BAO(z_background, p).T
+        block[names.distances, "rs_DV"] = rs_DV
+        block[names.distances, "F_AP"] = F_AP
 
 def compute_growth_rates(r, block, P_tot, k, z, more_config):
     if P_tot is None:
@@ -557,16 +578,68 @@ def save_cls(r, p, block):
         block[names.cmb_cl, "PE"] = cl[2:,2]*(ell*(ell+1))/(2*np.pi)
 
 
+# JMedit: new function here
+def sigma8_to_As(block, config, more_config, cosmology_params, dark_energy, reion):
+    """
+    If input parameters include sigma_8_input, convert that to A_s.
+
+    This function will run CAMB once to compute the linear  matter power spectrum 
+
+    This function is adapted from the sigma8toAs module in the
+    KIDS KCAP repoistory written by by Tilman Troester.
+    """
+    sigma_8_input = block[cosmo,'sigma_8_input']
+    temp_As = 2.1e-9
+    block[cosmo,'A_s'] = temp_As
+    init_power_temp = extract_initial_power_params(block, config, more_config)
+
+    # do nothing except get linear power spectrum
+    p_temp = camb.CAMBparams(WantTransfer=True,
+                             Want_CMB=False, Want_CMB_lensing=False, DoLensing=False,
+                             NonLinear="NonLinear_none",
+                             WantTensors=False, WantVectors=False, WantCls=False,
+                             WantDerivedParameters=False,
+                             want_zdrag=False, want_zstar=False,\
+                             DarkEnergy=dark_energy,
+                             InitPower = init_power_temp,\
+                             )
+    # making these choices match main setup
+    p_temp.set_accuracy(**more_config["accuracy_params"])
+    p_temp.set_cosmology(ombh2 = block[cosmo, 'ombh2'],
+                         omch2 = block[cosmo, 'omch2'],
+                         omk = block[cosmo, 'omega_k'],
+                         **more_config["cosmology_params"],
+                         **cosmology_params)
+    p_temp.set_matter_power(redshifts=[0.], nonlinear=False, **more_config["transfer_params"])
+    p_temp.Reion = reion
+    r_temp = camb.get_results(p_temp)
+    temp_sig8 = r_temp.get_sigma8()[-1] #what sigma8 comes out from using temp_As?
+    As = temp_As*(sigma_8_input/temp_sig8)**2
+    block[cosmo,'A_s'] = As
+    #print(">>>>> temp_As",temp_As,'As',As,'sigma_8_input',sigma_8_input,'temp_sig8',temp_sig8)
+    
+
 def execute(block, config):
     config, more_config = config
-    p = extract_camb_params(block, config, more_config)
-    
-    if (not p.WantCls) and (not p.WantTransfer):
-        # Background only mode
-        r = camb.get_background(p)
-    else:
-        # other modes
-        r = camb.get_results(p)
+
+    try:
+        p = extract_camb_params(block, config, more_config)
+
+        if (not p.WantCls) and (not p.WantTransfer):
+            # Background only mode
+            r = camb.get_background(p)
+        else:
+            # other modes
+            r = camb.get_results(p)
+    except camb.CAMBError:
+        if more_config["n_printed_errors"] <= more_config["max_printed_errors"]:
+            print("CAMB error caught: for these parameters")
+            print(p)
+            print(traceback.format_exc())
+            if more_config["n_printed_errors"] == more_config["max_printed_errors"]:
+                print("\nFurther errors will not be printed.")
+            more_config["n_printed_errors"] += 1
+        return 1
 
     save_derived_parameters(r, p, block)
     save_distances(r, p, block, more_config)

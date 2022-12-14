@@ -47,7 +47,10 @@ OPTFLAG = -O3
 #OMPFLAG   = -openmp
 
 # all other compilation flags
-CCFLAG = -g -fPIC $(CFLAGS) -std=gnu99
+# JAZ - added GSL here not because it actually needs GSL but
+# with conda it forces the compiler to find omp.h. I don't
+# understand why this only recently stopped working.
+CCFLAG = -g -fPIC $(CFLAGS) -std=gnu99  -I ${GSL_INC}
 LDFLAG = -g -fPIC $(CFLAGS)
 
 # leave blank to compile without HyRec, or put path to HyRec directory
@@ -157,7 +160,7 @@ PYTHON_FILES = python/classy.pyx python/setup.py python/cclassy.pxd python/test_
 all: external/distortions/Greens_data.dat  class libclass.a classy
 
 external/distortions/Greens_data.dat:
-	cd external/distortions && gunzip --keep --force Greens_data.dat.gz
+	cd external/distortions && gunzip --force -c Greens_data.dat.gz > Greens_data.dat
 
 libclass.a: $(TOOLS) $(SOURCE) $(EXTERNAL)
 	$(AR)  $@ $(addprefix build/, $(TOOLS) $(SOURCE) $(EXTERNAL))
