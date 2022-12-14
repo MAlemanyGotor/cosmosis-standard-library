@@ -661,6 +661,9 @@ def real_space_cov( cl_cov, cl_specs, cl2xi_types, ell_max, angle_lims_rad,
                         xi_cov_block_signal_mixed, angle_mids = downsample_block( angle_lims_rad_upsampled, 
                             angle_mids_rad_upsampled, xi_cov_block_signal_mixed_upsampled, ntheta )
                         xi_cov_block = xi_cov_block_signal_mixed + np.diag(xi_cov_block_noise_noise_diag)
+                        print("xi1")
+                        print(xi_cov_block)
+                        print("xi2")
                     cov_blocks[i_xi, j_xi, i_bp, j_bp] = xi_cov_block
 
     #construct full covariance
@@ -672,12 +675,14 @@ def real_space_cov( cl_cov, cl_specs, cl2xi_types, ell_max, angle_lims_rad,
         inds_i = np.arange( xi_starts[i_xi] + ntheta*i_bp, xi_starts[i_xi] + ntheta*(i_bp+1) )
         inds_j = np.arange( xi_starts[j_xi] + ntheta*j_bp, xi_starts[j_xi] + ntheta*(j_bp+1) )
         cov_inds = np.ix_( inds_i, inds_j )
+        #print(block_vals)
         covmat[ cov_inds ] = block_vals
         cov_inds_T = np.ix_( inds_j, inds_i )
         covmat[ cov_inds_T ] = block_vals.T
 
     print("Completed covariance")
     print("slog det:", np.linalg.slogdet(covmat))
+    #print(covmat)
     print("condition number:", np.linalg.cond(covmat))
 
     return cov_blocks, covmat, xi_starts, xi_lengths

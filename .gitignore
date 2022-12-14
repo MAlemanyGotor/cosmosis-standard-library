@@ -23,3 +23,16 @@ likelihood/planck2015/plc-2.0/buildir/
 likelihood/planck2015/plc-2.0/include/
 likelihood/planck2015/plc-2.0/lib/
 likelihood/planck2015/plc-2.0/share/
+examples
+examples_cristian
+examples_full
+examples_gc
+examples_min_change
+examples_mod
+examples_original
+examples_true
+examples_true_original
+examples_v2
+examples_wl
+marc
+marc_sim_data_vec

@@ -221,7 +221,7 @@ def execute(block, config):
         # Set input parameters
         params = get_class_inputs(block, config)
         c.set(params)
-
+        print(params)
         # Run calculations
         c.compute()
 

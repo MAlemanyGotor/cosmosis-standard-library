@@ -267,7 +267,9 @@ def execute(block, config):
     #generate a TheorySpectrum for the corresponding Cl.
     print("Generating twopoint file with the following spectra:")
     print("    ", config['spectrum_sections'])
+    print(len(config["spectrum_sections"]))
     for i_spec in range( len(config["spectrum_sections"]) ):
+        print(i_spec)
         auto_only = config["auto_only"][i_spec]
         spectrum_section = config["spectrum_sections"][i_spec]
         output_extension = config["output_extensions"][i_spec]
@@ -322,8 +324,12 @@ def execute(block, config):
         if make_covariance:
             if real_space:
                 #In this case we also need the corresponding Cl spectra to generate the covariance
+                print('hello')
+                print(config["cl_sections"])
+                print(i_spec)
                 cl_section = config["cl_sections"][i_spec]
                 cl_spec = TheorySpectrum.from_block(block, cl_section, auto_only=False)
+                print(cl_spec.types)
                 if cl_spec.is_bin_averaged:
                     raise ValueError("We need interpolated C_ell values for covariances, but your pipeline supplied bin-averaged")
                 cl_theory_spec_list.append( cl_spec )

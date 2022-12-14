@@ -1,0 +1,10 @@
+auto_only = False
+bin_avg = False
+is_auto = True
+nbin = 10
+nbin_a = 10
+nbin_b = 10
+sample_a = 'lens'
+sample_b = 'lens'
+save_name = ''
+sep_name = 'ell'

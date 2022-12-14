@@ -1,0 +1,6 @@
+alpha = 2.0
+beta = 0.68
+bias = 0.0
+ngal = 27.0
+sigz = 0.05
+z0 = 0.11
